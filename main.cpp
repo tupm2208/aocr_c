@@ -15,6 +15,7 @@
 #include "tensorflow/core/platform/init_main.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/util/command_line_flags.h"
+#include "tensorflow/cc/client/client_session.h"
 
 #include <opencv2/core/mat.hpp>
 #include <opencv2/videoio.hpp>
@@ -37,20 +38,15 @@ using namespace cv;
 
 int main(int argc, char* argv[]) {
 
+
     // Set dirs variables
-    string ROOTDIR = "/home/tupm/HDD/projects/tensorflow-object-detection-cpp/";
-    string LABELS = "demo/ssd_mobilenet_v1_egohands/labels_map.pbtxt";
-    // string GRAPH = "demo/ssd_mobilenet_v1_egohands/frozen_inference_graph.pb";
-    string GRAPH = "demo/yolov3/model.pb";
+    string ROOTDIR = "/home/tupm/HDD/projects/tensorflow-object-detection-cpp/assets/";
+    string GRAPH = "text_models/general_binary_model.pb";
 
     // Set input & output nodes names
-    string inputLayer = "input_1:0";
-    // vector<string> outputLayer = {"detection_boxes:0", "detection_scores:0", "detection_classes:0", "num_detections:0"};
-    vector<string> outputLayer = {"conv2d_59/BiasAdd:0", "conv2d_67/BiasAdd:0", "conv2d_75/BiasAdd:0"};
-    // Tensor("conv2d_59/BiasAdd:0", shape=(?, ?, ?, 27), dtype=float32)
-    // Tensor("conv2d_67/BiasAdd:0", shape=(?, ?, ?, 27), dtype=float32)
-    // Tensor("conv2d_75/BiasAdd:0", shape=(?, ?, ?, 27), dtype=float32)
-    // Load and initialize the model from .pb file
+    string inputLayer = "img_data";
+    vector<string> outputLayer = {"Squeeze"};
+
     std::unique_ptr<tensorflow::Session> session;
     string graphPath = tensorflow::io::JoinPath(ROOTDIR, GRAPH);
     LOG(INFO) << "graphPath:" << graphPath;
@@ -61,21 +57,10 @@ int main(int argc, char* argv[]) {
     } else
         LOG(INFO) << "loadGraph(): frozen graph loaded" << endl;
 
-
-    // Load labels map from .pbtxt file
-    // std::map<int, std::string> labelsMap = std::map<int,std::string>();
-    // Status readLabelsMapStatus = readLabelsMapFile(tensorflow::io::JoinPath(ROOTDIR, LABELS), labelsMap);
-    // if (!readLabelsMapStatus.ok()) {
-    //     LOG(ERROR) << "readLabelsMapFile(): ERROR" << loadGraphStatus;
-    //     return -1;
-    // } else
-    //     LOG(INFO) << "readLabelsMapFile(): labels map loaded with " << labelsMap.size() << " label(s)" << endl;
-
+    
     Mat frame;
-    Tensor tensor;
+    Tensor imageTensor, embeddingTensor;
     std::vector<Tensor> outputs;
-    double thresholdScore = 0.5;
-    double thresholdIOU = 0.8;
 
     // FPS count
     int nFrames = 25;
@@ -84,78 +69,121 @@ int main(int argc, char* argv[]) {
     time_t start, end;
     time(&start);
 
-    // Start streaming frames from camera
-    VideoCapture cap("/home/tupm/Videos/final.mp4");
+    Mat image = imread("/home/tupm/HDD/projects/koya_screenshot_ocr/logs/20200916224955/IMG_2932/crop_images/text_box_2.jpg");
     
-    tensorflow::TensorShape shape = tensorflow::TensorShape();
-    shape.AddDim(1);
-    shape.AddDim((int64)cap.get(CAP_PROP_FRAME_HEIGHT));
-    shape.AddDim((int64)cap.get(CAP_PROP_FRAME_WIDTH));
-    shape.AddDim(3);
-    cap >> frame;
-    
-    tensor = convertMatToTensorYolo(frame);
-    
-    while (cap.isOpened()) {
-        auto start_time = std::chrono::high_resolution_clock::now();
-        cap >> frame;
-        // cvtColor(frame, frame, COLOR_BGR2RGB);
-        
-        // cout << "Frame # " << iFrame << endl;
 
-        // if (nFrames % (iFrame + 1) == 0) {
-        //     time(&end);
-        //     fps = 1. * nFrames / difftime(end, start);
-        //     time(&start);
-        // }
-        iFrame++;
-        // auto start_time = std::chrono::high_resolution_clock::now();
-        // Convert mat to tensor
-        // tensor = Tensor(tensorflow::DT_FLOAT, shape);
-        
-        // Status readTensorStatus = readTensorFromMat(frame, tensor);
-        // if (!readTensorStatus.ok()) {
-        //     LOG(ERROR) << "Mat->Tensor conversion failed: " << readTensorStatus;
-        //     return -1;
-        // }
-        // tensor = convertMatToTensorYolo(frame);
-        
-        // Run the graph on tensor
-        outputs.clear();
-        Status runStatus = session->Run({{inputLayer, tensor}}, outputLayer, {}, &outputs);
-        if (!runStatus.ok()) {
-            LOG(ERROR) << "Running model failed: " << runStatus;
-            return -1;
-        }
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto time = end_time - start_time;
-        float end = time/std::chrono::milliseconds(1);
-        cout << "fps: " << (float)1000/end << endl;
+    imageTensor = convertMatToTensorYolo(image);
 
-        // Extract results from the outputs vector
-        // tensorflow::TTypes<float>::Flat scores = outputs[1].flat<float>();
-        // tensorflow::TTypes<float>::Flat classes = outputs[2].flat<float>();
-        // tensorflow::TTypes<float>::Flat numDetections = outputs[3].flat<float>();
-        // tensorflow::TTypes<float, 3>::Tensor boxes = outputs[0].flat_outer_dims<float,3>();
+    Status runStatus = session->Run({{inputLayer, imageTensor}}, outputLayer, {}, &outputs);
 
-        // vector<size_t> goodIdxs = filterBoxes(scores, boxes, thresholdIOU, thresholdScore);
-        // for (size_t i = 0; i < goodIdxs.size(); i++)
-        //     LOG(INFO) << "score:" << scores(goodIdxs.at(i)) << ",class:" << labelsMap[classes(goodIdxs.at(i))]
-        //               << " (" << classes(goodIdxs.at(i)) << "), box:" << "," << boxes(0, goodIdxs.at(i), 0) << ","
-        //               << boxes(0, goodIdxs.at(i), 1) << "," << boxes(0, goodIdxs.at(i), 2) << ","
-        //               << boxes(0, goodIdxs.at(i), 3);
-
-        // // Draw bboxes and captions
-        // cvtColor(frame, frame, COLOR_BGR2RGB);
-        // drawBoundingBoxesOnImage(frame, scores, classes, boxes, labelsMap, goodIdxs);
-
-        // putText(frame, to_string(fps).substr(0, 5), Point(0, frame.rows), FONT_HERSHEY_SIMPLEX, 0.7, Scalar(255, 255, 255));
-        
-        
-        // imshow("stream", frame);
-        // waitKey(5);
+    if (!runStatus.ok()){
+        LOG(INFO) << "Running model failed: " << runStatus;
+        return -1;
     }
-    destroyAllWindows();
+
+    // tensorflow::TTypes<float>::Flat embeddingData = outputs[0].flat<float>();
+    float* p = outputs[0].flat<float>().data();
+
+    tensorflow::Scope transposeScope = tensorflow::Scope::NewRootScope();
+
+    tensorflow::TensorShape embeddingShape = outputs[0].shape();
+    
+    int eh = embeddingShape.dim_size(0);
+    int ew = embeddingShape.dim_size(1);
+    int channels = embeddingShape.dim_size(2);
+
+    auto transOps = tensorflow::ops::ConjugateTranspose(transposeScope, outputs[0], tensorflow::ops::Const(transposeScope, {1, 0, 2}));
+
+    tensorflow::ClientSession sess(transposeScope);
+    std::vector<Tensor> outputs1;
+    TF_CHECK_OK(sess.Run({transOps}, &outputs1));
+
+    auto padValue = tensorflow::ops::Const(transposeScope, {{0, 400-ew}, {0, 0}, {0, 0}});
+    auto padOps = tensorflow::ops::Pad(transposeScope, outputs1[0], padValue);
+
+    TF_CHECK_OK(sess.Run({padOps}, &outputs));
+
+    tensorflow::TensorShape bz{1};
+    Tensor batchsize(tensorflow::DT_INT32, bz);
+    auto bz_map = batchsize.tensor<int32, 1>();
+    bz_map(0) = 1;
+    vector<string> inputLayers = {"transpose_1", "decoder0"};
+    vector<Tensor> inputValues = {outputs[0], batchsize};
+    
+
+    for (int i = 0; i < 400; i++) {
+        tensorflow::TensorShape mks{1, 1};
+        Tensor mask(tensorflow::DT_FLOAT, mks);
+        auto input_tensor_mapped = mask.tensor<float, 2>();
+        input_tensor_mapped(0, 0) = i < ew? 1.0f: 0.0f;
+        inputValues.push_back(mask);
+
+        string name = "encoder_mask" + std::to_string(i);
+        inputLayers.push_back(name);
+    }
+
+
+    vector<string> outputLayers;
+
+
+    for (int l = 0; l < 42; l++){
+        string tem = "";
+        if (l!=0) {
+            tem = "_" + to_string(l);
+        }
+        string layer = "model_with_buckets/embedding_attention_decoder/attention_decoder/AttnOutputProjection"+tem+"/AttnOutputProjection/BiasAdd";
+        outputLayers.push_back(layer);
+        
+    }
+
+    for (int l = 0; l < 42; l++){
+        
+        string tem = "";
+        if (l!=0) {
+            tem = "_" + to_string(l);
+        }
+        string layer = "model_with_buckets/embedding_attention_decoder/attention_decoder/Attention_0"+tem+"/Softmax";
+        outputLayers.push_back(layer);
+    }
+  
+    LOG(INFO) << outputs[0].shape();
+
+    std::vector<std::pair<std::string, tensorflow::Tensor>> feed_dict;
+
+    for (int i = 0; i< 402; i++) {
+        feed_dict.push_back(std::pair<std::string, tensorflow::Tensor>(inputLayers[i], inputValues[i]));
+    }
+    vector<Tensor> finalOutputs;
+    // outputs.clear();
+    runStatus = session->Run(feed_dict, outputLayers, {}, &finalOutputs);
+
+    if (!runStatus.ok()){
+        LOG(INFO) << "Running model failed: " << runStatus;
+        return -1;
+    }
+
+    vector<Tensor> stepLogits;
+    vector<Tensor> outputStepLogits;
+
+    float_t *plant_pointer = finalOutputs[1].flat<float_t>().data();
+    // int mx = 0;
+    // float cr_max = -1;
+    // for (int i = 0; i < 400; i++) {
+    //     cout << *(plant_pointer + i) << " ";
+    //     if (cr_max < *(plant_pointer + i)) {
+    //         cr_max = *(plant_pointer + i);
+    //         mx = i;
+    //     }
+    // }
+    // cout << mx << " ";
+    
+
+    for (int i = 0; i< 42; i++){
+        auto argOps = tensorflow::ops::ArgMax(transposeScope, finalOutputs[i], tensorflow::ops::Const(transposeScope, 1));
+        TF_CHECK_OK(sess.Run({argOps}, &stepLogits));
+        outputStepLogits.push_back(stepLogits[0]);
+        cout << stepLogits[0].scalar<int>() << endl;
+    }
 
     return 0;
 }

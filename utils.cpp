@@ -30,6 +30,7 @@
 // #include "opencv2/opencv.hpp"
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
 
 using namespace std;
 using namespace cv;
@@ -56,6 +57,18 @@ Status loadGraph(const string &graph_file_name,
     if (!session_create_status.ok()) {
         return session_create_status;
     }
+    int node_count = graph_def.node_size();
+    
+    
+    // ofstream myfile ("example.txt");
+    // for (int i = 0; i < node_count; i++)
+    // {
+    //         auto n = graph_def.node(i);
+    //         myfile << n.name() << endl;
+    //         cout<<"Names : "<< n.name() << node_count <<endl;
+
+    // }
+    // myfile.close();
     return Status::OK();
 }
 
@@ -124,17 +137,31 @@ Tensor convertMatToTensor(Mat &input)
 
 Tensor convertMatToTensorYolo(Mat &input)
 {   
-    cv::resize(input, input, cv::Size(cv::Size2d(288, 288)));
-    LOG(ERROR) << "error---------------------------------------: ";
+    
+    cv::cvtColor(input, input, cv::COLOR_BGR2GRAY);
+    threshold(input,input, 125, 255, THRESH_BINARY);
     int height = input.rows;
     int width = input.cols;
     int depth = input.channels();
 
-    Tensor imgTensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({1, height, width, depth}));
+    width = 32 * width/height;
+    height = 32;
+    cv::resize(input, input, cv::Size(cv::Size2d(width, 32)));
+    // cv::imshow("", input);
+    // cv::waitKey(0);
+    cout << input.rows << " " << input.cols << " " << input.channels() << endl;
+
+    Tensor imgTensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({1, 1, height, width}));
 
     float *p = imgTensor.flat<float>().data();
-    Mat fakeMat(input.rows, input.cols, CV_32FC3, p);
-    input.convertTo(fakeMat, CV_32FC3);
+    Mat fakeMat(input.rows, input.cols, CV_32FC1, p);
+    input.convertTo(fakeMat, CV_32FC1);
+
+    // Tensor imgTensor(tensorflow::DT_UINT8, tensorflow::TensorShape({1, 1, height, width}));
+
+    // uint8_t *p = imgTensor.flat<uint8_t>().data();
+    // Mat fakeMat(input.rows, input.cols, CV_8UC3, p);
+    // input.convertTo(fakeMat, CV_8UC3);
 
     // float* p = imgTensor.flat<float>().data();
     // Mat outputImg(height, width, CV_32FC3, p);
