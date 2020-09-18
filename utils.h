@@ -17,7 +17,7 @@ using tensorflow::string;
 Status readLabelsMapFile(const string &fileName, std::map<int, string> &labelsMap);
 
 Status loadGraph(const string &graph_file_name,
-                 std::unique_ptr<tensorflow::Session> *session);
+                 std::shared_ptr<tensorflow::Session> *session);
 
 Status readTensorFromMat(const cv::Mat &mat, Tensor &outTensor);
 
@@ -37,4 +37,7 @@ std::vector<size_t> filterBoxes(tensorflow::TTypes<float>::Flat &scores,
                                 double thresholdIOU, double thresholdScore);
 
 Tensor convertMatToTensor(cv::Mat &input);
-Tensor convertMatToTensorYolo(cv::Mat &input);                           
+Tensor convertMatToTensorYolo(cv::Mat &input);    
+Tensor cnnPart(std::vector<cv::Mat> images, std::shared_ptr<tensorflow::Session> session, std::vector<tensorflow::Tensor> &outputMask);   
+std::vector<std::vector<int>> handleFinalOutput(std::vector<Tensor> &inputs);
+std::vector<string> readLabels();                

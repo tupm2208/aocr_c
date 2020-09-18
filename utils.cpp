@@ -25,12 +25,14 @@
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/public/session.h"
 #include "tensorflow/core/util/command_line_flags.h"
+#include "tensorflow/cc/client/client_session.h"
 
 // #include <cv.hpp>
 // #include "opencv2/opencv.hpp"
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include "tensorflow/core/public/session.h"
 
 using namespace std;
 using namespace cv;
@@ -44,7 +46,7 @@ using tensorflow::int32;
 /** Read a model graph definition (xxx.pb) from disk, and creates a session object you can use to run it.
  */
 Status loadGraph(const string &graph_file_name,
-                 unique_ptr<tensorflow::Session> *session) {
+                 shared_ptr<tensorflow::Session> *session) {
     tensorflow::GraphDef graph_def;
     Status load_graph_status =
             ReadBinaryProto(tensorflow::Env::Default(), graph_file_name, &graph_def);
@@ -70,6 +72,122 @@ Status loadGraph(const string &graph_file_name,
     // }
     // myfile.close();
     return Status::OK();
+}
+
+tensorflow::Scope transposeScope = tensorflow::Scope::NewRootScope();
+vector<Tensor> temOutputs;
+tensorflow::ClientSession sess(transposeScope);
+
+Tensor handleCNNOutput(vector<Tensor> outputTensors) {
+    
+    auto transOps = tensorflow::ops::ConjugateTranspose(transposeScope, outputTensors[0], tensorflow::ops::Const(transposeScope, {1, 0, 2}));
+    TF_CHECK_OK(sess.Run({transOps}, &outputTensors));
+
+    int width = outputTensors[0].shape().dim_size(0);
+    auto padValue = tensorflow::ops::Const(transposeScope, {{0, 400-width}, {0, 0}, {0, 0}});
+    auto padOps = tensorflow::ops::Pad(transposeScope, outputTensors[0], padValue);
+    TF_CHECK_OK(sess.Run({padOps}, &outputTensors));
+
+    return outputTensors[0];
+}
+
+void getTensorMask(vector<int> limit, vector<Tensor> &outputMask) {
+    for (int i = 0; i < 400; i++) {
+        tensorflow::TensorShape mks{int(limit.size()), 1};
+        Tensor mask(tensorflow::DT_FLOAT, mks);
+        auto input_tensor_mapped = mask.tensor<float, 2>();
+
+        int c = 0;
+        for(int j: limit) {
+            
+            input_tensor_mapped(c, 0) = i < j? 1.0f: 0.0f;
+            c += 1;
+        }
+        outputMask.push_back(mask);
+        // cout << mask.shape() << endl;
+    }
+}
+
+vector<vector<int>> handleFinalOutput(std::vector<Tensor> &inputs) {
+
+    int batch = inputs[0].shape().dim_size(0);
+    vector<vector<int>> listOutput;
+    for(int i = 0; i<batch; i++) {
+        vector<int> element;
+        listOutput.push_back(element);
+    }
+    vector<Tensor> outputs;
+    for (Tensor outputTensor: inputs) {
+        auto argOps = tensorflow::ops::ArgMax(transposeScope, outputTensor, tensorflow::ops::Const(transposeScope, 1));
+        TF_CHECK_OK(sess.Run({argOps}, &temOutputs));
+
+        auto castOps = tensorflow::ops::Cast(transposeScope, temOutputs[0], tensorflow::DataType::DT_INT32);
+        TF_CHECK_OK(sess.Run({castOps}, &temOutputs));
+
+        auto bz_map = temOutputs[0].tensor<int32, 1>();
+        for(int i = 0; i<batch; i++) {
+            listOutput.at(i).push_back(bz_map(i));
+        }
+    }
+
+    cout << listOutput[0].size() << " " << listOutput[1].size() << endl;
+    return listOutput;
+}
+
+
+Tensor cnnPart(vector<Mat> images, std::shared_ptr<tensorflow::Session> session, vector<Tensor> &outputMask) {
+
+    string inputLayer = "img_data";
+    vector<string> outputLayer = {"Squeeze"};
+    vector<tensorflow::Output> OutputList;
+    
+    vector<Tensor> outputs;
+    vector <int> maskLimit;
+    Tensor currentTensor;
+    Tensor nextTensor;
+    
+    for(int i = 0; i < images.size(); i++) {
+        Mat image = images[i];
+        Tensor imageTensor = convertMatToTensorYolo(image);
+        Status runStatus = session->Run({{inputLayer, imageTensor}}, outputLayer, {}, &temOutputs);
+
+        if (!runStatus.ok()){
+            LOG(INFO) << "Running model CNN part failed: " << runStatus;
+        }
+        maskLimit.push_back(temOutputs[0].shape().dim_size(1));
+        if (i == 0) {
+            currentTensor = handleCNNOutput(temOutputs);
+        } else {
+            nextTensor = handleCNNOutput(temOutputs);
+            auto t1 = tensorflow::ops::Const(transposeScope, currentTensor);
+            auto t2 = tensorflow::ops::Const(transposeScope, nextTensor);
+            auto concatOps = tensorflow::ops::Concat(transposeScope, {t1, t2}, 1);
+            TF_CHECK_OK(sess.Run({concatOps}, &outputs));
+
+            currentTensor = outputs[0];
+        }
+    }
+    getTensorMask(maskLimit, outputMask);
+    return currentTensor;
+}
+
+vector<string> readLabels() {
+    string label_path = "/home/tupm/HDD/projects/tensorflow-object-detection-cpp/assets/text_models/labels.txt";
+    vector<string> outputlabels;
+    string tem("");
+    char x;
+    ifstream inFile;
+    inFile.open(label_path);
+    if (!inFile) {
+        cout << "Unable to open file";
+        exit(1); // terminate with error
+    }
+    while(getline(inFile, tem)){
+        // cout << tem << "\n";
+        outputlabels.push_back(tem);
+    }
+    // cout << "number of labels: " << outputlabels.size() << endl;
+    return outputlabels;
 }
 
 /** Read a labels map file (xxx.pbtxt) from disk to translate class numbers into human-readable labels.
@@ -137,7 +255,6 @@ Tensor convertMatToTensor(Mat &input)
 
 Tensor convertMatToTensorYolo(Mat &input)
 {   
-    
     cv::cvtColor(input, input, cv::COLOR_BGR2GRAY);
     threshold(input,input, 125, 255, THRESH_BINARY);
     int height = input.rows;
@@ -147,25 +264,12 @@ Tensor convertMatToTensorYolo(Mat &input)
     width = 32 * width/height;
     height = 32;
     cv::resize(input, input, cv::Size(cv::Size2d(width, 32)));
-    // cv::imshow("", input);
-    // cv::waitKey(0);
-    cout << input.rows << " " << input.cols << " " << input.channels() << endl;
 
     Tensor imgTensor(tensorflow::DT_FLOAT, tensorflow::TensorShape({1, 1, height, width}));
 
     float *p = imgTensor.flat<float>().data();
     Mat fakeMat(input.rows, input.cols, CV_32FC1, p);
     input.convertTo(fakeMat, CV_32FC1);
-
-    // Tensor imgTensor(tensorflow::DT_UINT8, tensorflow::TensorShape({1, 1, height, width}));
-
-    // uint8_t *p = imgTensor.flat<uint8_t>().data();
-    // Mat fakeMat(input.rows, input.cols, CV_8UC3, p);
-    // input.convertTo(fakeMat, CV_8UC3);
-
-    // float* p = imgTensor.flat<float>().data();
-    // Mat outputImg(height, width, CV_32FC3, p);
-    // input.convertTo(outputImg, CV_32FC3);
 
     return imgTensor;
 }

@@ -10,16 +10,19 @@ arr = [3222,
 2397,
 3418]
 
-# for i, e in zip(data.keys(), data.values()):
-    
-#     if e == 10:
-#         break
-#     print(i, e)
+f = open('/home/tupm/HDD/projects/tensorflow-object-detection-cpp/assets/text_models/labels.txt', 'w')
 
-for v in arr:
-    for i, e in zip(data.keys(), data.values()):
+for i, e in zip(data.keys(), data.values()):
+    
+    # if e == 10:
+    #     break
+    # print(i, e)
+    f.write(i+'\n')
+
+# for v in arr:
+#     for i, e in zip(data.keys(), data.values()):
         
-        if e == v-3:
-            print(i, e)
-            break
+#         if e == v-3:
+#             print(i, e)
+#             break
         
